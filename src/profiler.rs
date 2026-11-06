@@ -927,6 +927,17 @@ pub fn record_proxyop_event_state_handler_v4(
 #[allow(clippy::boxed_local)]
 pub fn finalize_handler(comm: Box<Communicator>) -> NcclResult<()> {
     if config::CONFIG.telemetry_mode > 0 {
+        // A C++ static destructor can finalize NCCL after this thread's Rust
+        // TLS has been destroyed. Run the entire cleanup on a fresh thread in
+        // that case: both event delivery and the daemon runtime use TLS.
+        if THREAD_STATE.try_with(|_| ()).is_err() {
+            return std::thread::Builder::new()
+                .name("nccl-profiler-finalize".into())
+                .spawn(move || finalize_handler(comm))
+                .map_err(|_| profiler_shim::ncclResult_t_ncclSystemError)?
+                .join()
+                .map_err(|_| profiler_shim::ncclResult_t_ncclInternalError)?;
+        }
         let mut lg = INIT_FLAG.lock().unwrap();
         if let Some(comm_hash) = comm.comm_hash {
             with_thread_state(|thread_state| {

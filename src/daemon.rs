@@ -844,6 +844,18 @@ where
         exporter.export(ctx, None)
     }
 
+    // Finalization may register a producer immediately before stopping the
+    // daemon. Include its queue in the final drain, even if the polling loop
+    // has already observed the stop flag.
+    while let Some(ctrl_msg) = ctx.profiler.ctrl_fifo.pop() {
+        match ctrl_msg {
+            ControlMessage::NewThread(mut ctrl) => {
+                ctrl.daemon_state.idx = threads.len();
+                threads.push(ctrl);
+            }
+        }
+    }
+
     for thread in threads.iter_mut() {
         thread
             .ncclop_fifo
